@@ -99,12 +99,13 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.O
             startActivityForResult(builder.build(MainActivity.this), requestCode);
         } catch (GooglePlayServicesRepairableException | GooglePlayServicesNotAvailableException e) {
             e.printStackTrace();
+            handleError("Error connecting to google apis");
         }
     }
 
     @Override
     public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
-
+        handleError("Error connecting to google apis");
     }
 
     @Override
@@ -132,15 +133,15 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.O
             if (anyPermissionGiven) {
                 startPicker(requestCode);
             } else {
-                handleNoPermissionGiven();
+                handleError("Need permission to do my job, bye!");
             }
         } else {
-            handleNoPermissionGiven();
+            handleError("Need permission to do my job, bye!");
         }
     }
 
-    private void handleNoPermissionGiven() {
-        Toast.makeText(this, "Need permission to do my job, bye!", Toast.LENGTH_SHORT).show();
+    private void handleError(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
         startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ")));
     }
 
