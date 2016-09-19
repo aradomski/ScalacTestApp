@@ -1,45 +1,52 @@
 package radomski.edu.pl.scalactestapp;
 
 import android.Manifest;
+import android.app.PendingIntent;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.databinding.DataBindingUtil;
 import android.net.Uri;
 import android.os.Bundle;
-import android.support.annotation.IntDef;
 import android.support.annotation.NonNull;
 import android.support.annotation.RequiresPermission;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
+import android.util.Log;
 import android.view.View;
 import android.widget.Toast;
 
 import com.google.android.gms.awareness.Awareness;
+import com.google.android.gms.awareness.fence.AwarenessFence;
+import com.google.android.gms.awareness.fence.FenceUpdateRequest;
+import com.google.android.gms.awareness.fence.LocationFence;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GooglePlayServicesNotAvailableException;
 import com.google.android.gms.common.GooglePlayServicesRepairableException;
 import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.common.api.Status;
 import com.google.android.gms.location.places.Place;
 import com.google.android.gms.location.places.Places;
 import com.google.android.gms.location.places.ui.PlacePicker;
-
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
+import com.google.android.gms.maps.model.LatLng;
 
 import radomski.edu.pl.scalactestapp.databinding.ActivityMainBinding;
 
 public class MainActivity extends AppCompatActivity implements GoogleApiClient.OnConnectionFailedListener {
 
-    @IntDef({WALLET_PLACE_PICKER_REQUEST, CAR_PLACE_PICKER_REQUEST})
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface RequestCodes {
-    }
-
+    private static final String TAG = MainActivity.class.getSimpleName();
+    private static final int FENCE_REQUEST = 125;
     private static final int WALLET_PLACE_PICKER_REQUEST = 123;
     private static final int CAR_PLACE_PICKER_REQUEST = 124;
-    private GoogleApiClient mGoogleApiClient;
+    public static final String FENCE_RECEIVER_ACTION = "fenceReciever";
+    public static final String KEY_CAR = "key_car";
+    public static final String KEY_WALLET = "key_wallet";
+    private GoogleApiClient googleApiClient;
     private ActivityMainBinding viewBinding;
     private MainActivityModel model;
+    private PendingIntent pendingIntent;
+    private FenceReceiver fenceReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -47,7 +54,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.O
         viewBinding = DataBindingUtil.setContentView(this, R.layout.activity_main);
         model = new MainActivityModel();
         viewBinding.setModel(model);
-        mGoogleApiClient = new GoogleApiClient
+        googleApiClient = new GoogleApiClient
                 .Builder(this)
                 .addApi(Places.GEO_DATA_API)
                 .addApi(Places.PLACE_DETECTION_API)
@@ -68,7 +75,10 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.O
                 startPickerWithPermissionCheck(CAR_PLACE_PICKER_REQUEST);
             }
         });
-
+        Intent intent = new Intent(FENCE_RECEIVER_ACTION);
+        pendingIntent = PendingIntent.getBroadcast(this, 0, intent, 0);
+        fenceReceiver = new FenceReceiver();
+        registerReceiver(fenceReceiver, new IntentFilter(FENCE_RECEIVER_ACTION));
     }
 
     private void startPickerWithPermissionCheck(int requestCode) {
@@ -98,7 +108,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.O
     }
 
     @Override
-    public void onRequestPermissionsResult(@RequestCodes int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 
         switch (requestCode) {
@@ -106,10 +116,12 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.O
             case WALLET_PLACE_PICKER_REQUEST:
                 handlePermissionResponse(requestCode, permissions, grantResults);
                 break;
+            case FENCE_REQUEST:
+                reqisterCarFence(model.carPlace.getLatLng());
         }
     }
 
-    private void handlePermissionResponse(@RequestCodes int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+    private void handlePermissionResponse(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         if (grantResults.length > 0) {
             boolean anyPermissionGiven = false;
             for (int i = 0; i < permissions.length; i++) {
@@ -132,26 +144,51 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.O
         startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ")));
     }
 
-    protected void onActivityResult(@RequestCodes int requestCode, int resultCode, Intent data) {
-        Place place;
-        String toastMsg;
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (resultCode == RESULT_OK) {
             switch (requestCode) {
                 case CAR_PLACE_PICKER_REQUEST:
-                    place = PlacePicker.getPlace(this, data);
-                    model.setCarPlace(place);
-                    toastMsg = String.format("Place: %s", place.getName());
-                    Toast.makeText(this, toastMsg, Toast.LENGTH_LONG).show();
+                    model.setCarPlace(PlacePicker.getPlace(this, data));
+                    LatLng latLng = model.getCarPlace().getLatLng();
+                    if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                        ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, FENCE_REQUEST);
+                        return;
+                    }
+                    PreferenceHelper.saveLocation(MainActivity.this, KEY_CAR, latLng);
+                    reqisterCarFence(latLng);
                     break;
                 case WALLET_PLACE_PICKER_REQUEST:
-                    place = PlacePicker.getPlace(this, data);
+                    Place place = PlacePicker.getPlace(this, data);
+                    PreferenceHelper.saveLocation(MainActivity.this, KEY_WALLET, place.getLatLng());
                     model.setWalletPlace(place);
-                    toastMsg = String.format("Place: %s", place.getName());
-                    Toast.makeText(this, toastMsg, Toast.LENGTH_LONG).show();
                     break;
             }
 
         }
     }
 
+    private void reqisterCarFence(LatLng latLng) {
+        AwarenessFence latLngFence =
+                AwarenessFence.or(LocationFence.entering(latLng.latitude, latLng.longitude, 10),
+                        LocationFence.in(latLng.latitude, latLng.longitude, 10, 10L));
+
+        registerFence(FENCE_RECEIVER_ACTION, latLngFence);
+    }
+
+    protected void registerFence(final String fenceKey, final AwarenessFence fence) {
+        Awareness.FenceApi.updateFences(googleApiClient,
+                new FenceUpdateRequest.Builder()
+                        .addFence(fenceKey, fence, pendingIntent)
+                        .build())
+                .setResultCallback(new ResultCallback<Status>() {
+                    @Override
+                    public void onResult(@NonNull Status status) {
+                        if (status.isSuccess()) {
+                            Log.i(TAG, "Fence was successfully registered.");
+                        } else {
+                            Log.e(TAG, "Fence could not be registered: " + status);
+                        }
+                    }
+                });
+    }
 }

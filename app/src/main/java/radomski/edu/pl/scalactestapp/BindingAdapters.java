@@ -16,4 +16,15 @@ public class BindingAdapters {
             view.setVisibility(View.GONE);
         }
     }
+
+    @BindingAdapter("placeVisibility")
+    public static void placeVisibility(View view, Place place) {
+        if (place != null) {
+            view.setVisibility(View.VISIBLE);
+        } else {
+            view.setVisibility(View.GONE);
+        }
+    }
+
+
 }

@@ -28,7 +28,7 @@
             android:layout_height="wrap_content"
             android:text="Pick wallet location" />
 
-        <Button
+        <Button app:placeVisibility="@{model.walletPlace}"
             android:id="@+id/car_location"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
